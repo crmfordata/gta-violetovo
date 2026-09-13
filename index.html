@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Grand Theft ФИОЛЕТОВО</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --purple:#2a1a4a; --violet:#7c3aed; --violet-bright:#a78bfa;
+    --accent:#ffd54f; --accent2:#ff9800; --ink:#e9e4ff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#14082e;
+    font-family:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--ink)}
+  #c3d{position:fixed;inset:0;display:block;cursor:grab}
+  #c3d.grabbing{cursor:grabbing}
+
+  /* ---- HUD ---- */
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:10}
+  #objective{
+    position:absolute;top:18px;left:50%;transform:translateX(-50%);
+    background:rgba(42,26,74,.72);border:1px solid rgba(167,139,250,.35);
+    border-radius:14px;padding:10px 22px;font-size:15px;font-weight:700;
+    letter-spacing:.2px;max-width:92vw;text-align:center;
+    box-shadow:0 4px 24px rgba(0,0,0,.45);
+  }
+  #objective .k{color:var(--accent)}
+  #controls{
+    position:absolute;bottom:16px;left:16px;
+    background:rgba(42,26,74,.72);border:1px solid rgba(167,139,250,.35);
+    border-radius:14px;padding:10px 16px;font-size:13px;font-weight:500;
+    line-height:1.75;
+  }
+  #controls b{color:var(--accent);font-weight:800}
+  #prompt{
+    position:absolute;bottom:26%;left:50%;transform:translateX(-50%);
+    background:rgba(42,26,74,.85);border:1px solid var(--accent);
+    color:var(--accent);border-radius:12px;padding:9px 20px;
+    font-size:16px;font-weight:800;opacity:0;transition:opacity .15s;
+  }
+  #prompt.show{opacity:1}
+  #hint-mount{position:absolute;top:70px;left:50%;transform:translateX(-50%);
+    color:var(--violet-bright);font-size:13px;font-weight:700;opacity:0;transition:opacity .3s}
+  #hint-mount.show{opacity:1}
+
+  /* ---- Миссия выполнена ---- */
+  #mission-complete{
+    position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center, rgba(42,26,74,.55) 0%, rgba(10,4,26,.92) 100%);
+    pointer-events:auto;
+  }
+  #mission-complete.show{display:flex}
+  .mc-box{
+    text-align:center;padding:48px 56px;border-radius:22px;
+    background:linear-gradient(160deg, rgba(74,42,106,.92), rgba(26,26,58,.94));
+    border:2px solid var(--violet);box-shadow:0 0 80px rgba(124,58,237,.45), inset 0 0 40px rgba(124,58,237,.12);
+    animation:pop .45s cubic-bezier(.2,1.4,.4,1);
+  }
+  @keyframes pop{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}
+  .mc-box .big{
+    font-size:clamp(26px,5vw,44px);font-weight:800;letter-spacing:1px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .mc-box .sub{margin-top:10px;font-size:15px;color:var(--violet-bright);font-weight:700}
+  .mc-box .logo{margin-top:26px;font-size:13px;letter-spacing:3px;color:var(--ink);opacity:.8}
+  .mc-box button{
+    margin-top:28px;pointer-events:auto;cursor:pointer;
+    background:var(--violet);color:#fff;border:none;border-radius:12px;
+    padding:12px 30px;font:800 16px 'Manrope',sans-serif;letter-spacing:.5px;
+    transition:transform .12s, box-shadow .12s;
+  }
+  .mc-box button:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(124,58,237,.5)}
+  #tip-mobile{display:none}
+  @media (max-width:760px){
+    #controls{bottom:10px;left:50%;transform:translateX(-50%);font-size:11px;padding:8px 12px;
+      white-space:nowrap}
+    #objective{font-size:12px;padding:8px 14px}
+  }
+</style>
+</head>
+<body>
+<canvas id="c3d"></canvas>
+
+<div id="hud">
+  <div id="objective">Задание: дойди до лошади, сядь и доедь до точки Б</div>
+  <div id="hint-mount">🏇 Лошадь рядом</div>
+  <div id="prompt">E — сесть на лошадь</div>
+  <div id="controls">
+    <b>WASD</b> — движение<br>
+    <b>Мышь</b> (зажать) / <b>Q·E</b> — камера<br>
+    <b>E</b> — сесть / слезть
+  </div>
+</div>
+
+<div id="mission-complete">
+  <div class="mc-box">
+    <div class="big">Задание выполнено!</div>
+    <div class="sub">Точка Б достигнута верхом на коне</div>
+    <div class="logo">GRAND THEFT ФИОЛЕТОВО</div>
+    <button id="btn-restart">Играть снова</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script id="js-core">
+/* ================= CORE: рендер, сцена, свет, ввод, звук ================= */
+var G = {
+  mounted:false, missionDone:false,
+  speed:0, walkSpeed:3.6, gallopSpeed:9.0,
+  camYaw:-Math.PI/2, camPitch:0.42, camDist:6.5,
+  keys:{}, phase:0, footTimer:0, gallopTimer:0, mountCooldown:0,
+  buildings:[], camBlocker:[],
+  audio:null, audioOn:false
+};
+var renderer, scene, camera;
+var player, horse, markerA, markerB;
+var horsePos = new THREE.Vector3(20, 0, 1.2);
+var pointB   = new THREE.Vector3(64, 0, 0);
+
+function initCore(){
+  renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c3d'), antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x2a1a4a, 55, 170);
+
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 600);
+  camera.position.set(6, 4, 8);
+
+  // Небо: градиент заката Vice City (фиолет -> оранж)
+  var skyCanvas = document.createElement('canvas');
+  skyCanvas.width = 2; skyCanvas.height = 256;
+  var ctx = skyCanvas.getContext('2d');
+  var grd = ctx.createLinearGradient(0, 0, 0, 256);
+  grd.addColorStop(0.00, '#1a0b3d');
+  grd.addColorStop(0.42, '#4a2a6a');
+  grd.addColorStop(0.62, '#7c3aed');
+  grd.addColorStop(0.80, '#c96a3b');
+  grd.addColorStop(0.92, '#ff9800');
+  grd.addColorStop(1.00, '#2a1a4a');
+  ctx.fillStyle = grd; ctx.fillRect(0, 0, 2, 256);
+  var skyTex = new THREE.CanvasTexture(skyCanvas);
+  skyTex.encoding = THREE.sRGBEncoding;
+  var sky = new THREE.Mesh(
+    new THREE.SphereGeometry(280, 24, 16),
+    new THREE.MeshBasicMaterial({map:skyTex, side:THREE.BackSide, fog:false})
+  );
+  scene.add(sky);
+
+  // Солнце (закатный диск)
+  var sun = new THREE.Mesh(
+    new THREE.CircleGeometry(16, 32),
+    new THREE.MeshBasicMaterial({color:0xffb74d, fog:false})
+  );
+  sun.position.set(-90, 18, -160);
+  sun.lookAt(0, 0, 0);
+  scene.add(sun);
+
+  // Свет
+  scene.add(new THREE.AmbientLight(0x6a4a9a, 0.75));
+  scene.add(new THREE.HemisphereLight(0x8a6ae0, 0x241a3d, 0.55));
+  var dir = new THREE.DirectionalLight(0xffb74d, 1.15);
+  dir.position.set(50, 70, 30);
+  dir.castShadow = true;
+  dir.shadow.mapSize.set(2048, 2048);
+  dir.shadow.camera.left = -80; dir.shadow.camera.right = 80;
+  dir.shadow.camera.top = 80;  dir.shadow.camera.bottom = -80;
+  dir.shadow.camera.far = 200;
+  scene.add(dir);
+
+  window.addEventListener('resize', onResize);
+  bindInput();
+  initAudio();
+}
+
+function onResize(){
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+/* ---------- Ввод ---------- */
+function bindInput(){
+  window.addEventListener('keydown', function(e){
+    if(e.code === 'KeyE' && !e.repeat){ tryMount(); }
+    G.keys[e.code] = true;
+    unlockAudio();
+  });
+  window.addEventListener('keyup', function(e){ G.keys[e.code] = false; });
+
+  var c = document.getElementById('c3d'), dragging = false, lastX = 0;
+  c.addEventListener('mousedown', function(e){ dragging = true; lastX = e.clientX; c.classList.add('grabbing'); });
+  window.addEventListener('mouseup', function(){ dragging = false; c.classList.remove('grabbing'); });
+  window.addEventListener('mousemove', function(e){
+    if(!dragging) return;
+    G.camYaw -= (e.clientX - lastX) * 0.006;
+    lastX = e.clientX;
+  });
+  window.addEventListener('touchmove', function(e){
+    if(e.touches.length === 1){
+      var dx = e.touches[0].clientX - lastX;
+      G.camYaw -= dx * 0.008;
+      lastX = e.touches[0].clientX;
+    }
+  }, {passive:true});
+  window.addEventListener('touchstart', function(e){ lastX = e.touches[0].clientX; unlockAudio(); }, {passive:true});
+
+  document.getElementById('btn-restart').addEventListener('click', function(){ location.reload(); });
+}
+
+/* ---------- Звук (Web Audio API, процедурный) ---------- */
+function initAudio(){
+  try{ G.audio = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){ G.audio = null; }
+}
+function unlockAudio(){
+  if(!G.audio) return;
+  if(G.audio.state === 'suspended') G.audio.resume();
+  G.audioOn = true;
+}
+function blip(freq, dur, type, vol){
+  if(!G.audio || !G.audioOn) return;
+  var t = G.audio.currentTime;
+  var o = G.audio.createOscillator(), g = G.audio.createGain();
+  o.type = type || 'square';
+  o.frequency.setValueAtTime(freq, t);
+  o.frequency.exponentialRampToValueAtTime(Math.max(30, freq*0.7), t + dur);
+  g.gain.setValueAtTime(vol || 0.09, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(G.audio.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function stepSound(){
+  if(Math.random() < 0.7) blip(85 + Math.random()*25, 0.07, 'square', 0.055);
+}
+function gallopSound(){
+  blip(60 + Math.random()*20, 0.09, 'triangle', 0.11);
+}
+function victoryJingle(){
+  var notes = [523.25, 659.25, 783.99, 1046.5];
+  notes.forEach(function(f, i){
+    setTimeout(function(){ blip(f, 0.34, 'triangle', 0.14); }, i * 170);
+  });
+}
+/*CORE-END*/
+
+</script>
+<script id="js-world">
+/* ================= WORLD: земля, деревня, лошадь, игрок ================= */
+var MAT = {};
+function makeMat(color, opts){
+  opts = opts || {};
+  var m = new THREE.MeshLambertMaterial({color:color});
+  if(opts.emissive) m = new THREE.MeshStandardMaterial({color:color, emissive:opts.emissive, emissiveIntensity:opts.intensity || 1});
+  return m;
+}
+function mesh(geo, mat, x, y, z, opts){
+  opts = opts || {};
+  var m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  if(opts.rx) m.rotation.x = opts.rx;
+  if(opts.ry) m.rotation.y = opts.ry;
+  if(opts.rz) m.rotation.z = opts.rz;
+  if(opts.cast !== false) m.castShadow = true;
+  if(opts.receive !== false) m.receiveShadow = true;
+  scene.add(m);
+  return m;
+}
+function boxMesh(w, h, d, color, x, y, z, opts){
+  return mesh(new THREE.BoxGeometry(w, h, d), makeMat(color), x, y, z, opts);
+}
+function cylMesh(rt, rb, h, color, x, y, z, opts){
+  return mesh(new THREE.CylinderGeometry(rt, rb, h, 10), makeMat(color), x, y, z, opts);
+}
+function coneMesh(r, h, color, x, y, z, opts){
+  return mesh(new THREE.ConeGeometry(r, h, 8), makeMat(color), x, y, z, opts);
+}
+function sphereMesh(r, color, x, y, z, opts){
+  return mesh(new THREE.SphereGeometry(r, 12, 10), makeMat(color), x, y, z, opts);
+}
+
+// AABB для коллизий: {minX,maxX,minZ,maxZ} (y игнорируем — плоский мир)
+function addBox(x, z, hw, hd){
+  G.buildings.push({minX:x-hw, maxX:x+hw, minZ:z-hd, maxZ:z+hd});
+}
+
+function initWorld(){
+  // Земля
+  var ground = mesh(new THREE.PlaneGeometry(340, 340), makeMat(0x241a3d), 0, 0, 0, {rx:-Math.PI/2, cast:false});
+  ground.receiveShadow = true;
+
+  // Дорога А -> Б (прямая, с лёгким сдвигом)
+  var roadLen = pointB.x + 6;
+  var road = mesh(new THREE.PlaneGeometry(roadLen, 6.5), makeMat(0x6d4c33), roadLen/2 - 2, 0.02, 0, {rx:-Math.PI/2, cast:false});
+  road.receiveShadow = true;
+  // обочины
+  var sideMat = makeMat(0x3a2a1e);
+  var s1 = mesh(new THREE.PlaneGeometry(roadLen, 1.1), sideMat, roadLen/2 - 2, 0.03, -3.8, {rx:-Math.PI/2, cast:false});
+  var s2 = mesh(new THREE.PlaneGeometry(roadLen, 1.1), sideMat, roadLen/2 - 2, 0.03,  3.8, {rx:-Math.PI/2, cast:false});
+
+  // Маркер А (старт) — светящийся фиолетовый столб
+  markerA = makeMarker(0x7c3aed);
+  markerA.position.set(0, 0, 0);
+  // Маркер Б (финиш) — светящийся
+  markerB = makeMarker(0xff9800);
+  markerB.position.copy(pointB);
+
+  // ---- Деревня ----
+  buildVillage();
+  // ---- Лошадь ----
+  horse = makeHorse();
+  horse.position.copy(horsePos);
+  horse.rotation.y = 0; // мордой к точке Б
+  // ---- Игрок ----
+  player = makePlayer();
+  player.position.set(0, 0, 1.5);
+}
+
+function makeMarker(color){
+  var g = new THREE.Group();
+  var pole = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 5, 10),
+    new THREE.MeshStandardMaterial({color:color, emissive:color, emissiveIntensity:0.9}));
+  pole.position.y = 2.5;
+  pole.castShadow = true;
+  g.add(pole);
+  var ring = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.09, 8, 24),
+    new THREE.MeshBasicMaterial({color:color}));
+  ring.rotation.x = -Math.PI/2;
+  ring.position.y = 0.12;
+  g.add(ring);
+  var light = new THREE.PointLight(color, 0.9, 18);
+  light.position.y = 3;
+  g.add(light);
+  g.userData.baseRing = ring;
+  scene.add(g);
+  return g;
+}
+
+/* ---------- Деревня ---------- */
+function buildVillage(){
+  var houseColors = [0x3d2b5e, 0x4a2a6a, 0x352452, 0x452e63];
+
+  // Дома слева от дороги
+  makeHouse(-14, -9, 2.6, houseColors[0], 0.3);
+  makeHouse(-30, -8, 2.2, houseColors[1], 2.1);
+  makeHouse(-46, -10, 2.8, houseColors[2], 4.9);
+  makeHouse(-26, 9.5, 2.4, houseColors[3], 0.9);
+  makeHouse(-44, 9, 2.1, houseColors[0], 3.3);
+  makeHouse(-9, 11, 2.5, houseColors[2], 5.2);
+
+  // Дома справа от дороги (ближе к финишу)
+  makeHouse(30, -9, 2.7, houseColors[1], 1.7);
+  makeHouse(46, -9, 2.3, houseColors[3], 4.1);
+  makeHouse(36, 10, 2.6, houseColors[0], 2.9);
+  makeHouse(52, 9, 2.2, houseColors[2], 0.5);
+  makeHouse(14, 11, 2.4, houseColors[1], 4.4);
+
+  // Церковь с куполом — финальный ориентир
+  makeChurch(58, 16);
+
+  // Деревья (тёмная фиолетово-зелёная листва)
+  var treeSpots = [[-6,-16],[-18,-17],[-38,-18],[-54,-14],[-58,-2],[-60,8],
+    [8,18],[22,-16],[40,-17],[56,-13],[66,6],[26,18],[44,17],[-50,18]];
+  for(var i = 0; i < treeSpots.length; i++){
+    makeTree(treeSpots[i][0], treeSpots[i][1], 1.6 + Math.random()*1.3);
+  }
+
+  // Заборы вдоль дороги
+  makeFence(-12, -5.6, 16, 'x');
+  makeFence(-6, 6.4, 18, 'x');
+  makeFence(28, -5.4, 14, 'x');
+  makeFence(32, 6.6, 14, 'x');
+
+  // Колодец
+  makeWell(-20, 14.5);
+
+  // Стога сена
+  makeHaystack(-16, -5.2);
+  makeHaystack(-17.6, -4.0);
+  makeHaystack(48, 6.5);
+  makeHaystack(49.8, 7.6);
+}
+
+function makeHouse(cx, cz, scale, color, ry){
+  var w = 4.4*scale, h = 2.9*scale, d = 3.6*scale;
+  var g = new THREE.Group();
+  // корпус
+  var body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), makeMat(color));
+  body.position.y = h/2;
+  body.castShadow = body.receiveShadow = true;
+  g.add(body);
+  // двускатная крыша (бокс, повёрнутый на 45°)
+  var roof = new THREE.Mesh(new THREE.BoxGeometry(w*0.78, w*0.78, d*1.25), makeMat(0x2a1a4a));
+  roof.position.y = h + w*0.18;
+  roof.rotation.z = Math.PI/4;
+  roof.rotation.y = 0;
+  roof.castShadow = true;
+  g.add(roof);
+  // окна (тёплый свет)
+  var winMat = new THREE.MeshStandardMaterial({color:0xffd54f, emissive:0xffa726, emissiveIntensity:1.4});
+  var win1 = new THREE.Mesh(new THREE.PlaneGeometry(0.7*scale, 0.7*scale), winMat);
+  win1.position.set(0, h*0.55, d/2 + 0.02);
+  g.add(win1);
+  var win2 = win1.clone();
+  win2.position.x = -w*0.3;
+  g.add(win2);
+  var win3 = win1.clone();
+  win3.position.x = w*0.3;
+  g.add(win3);
+  // дверь
+  var door = new THREE.Mesh(new THREE.PlaneGeometry(0.8*scale, 1.5*scale), makeMat(0x1a0f30));
+  door.position.set(0, 0.75*scale, d/2 + 0.02);
+  g.add(door);
+  // фонарик над дверью
+  var lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16*scale, 8, 6),
+    new THREE.MeshBasicMaterial({color:0xffd54f}));
+  lamp.position.set(0, h*0.92, d/2 + 0.06);
+  g.add(lamp);
+
+  g.position.set(cx, 0, cz);
+  g.rotation.y = ry;
+  scene.add(g);
+
+  // AABB в мировых координатах (поворот игнорируем — запас 0.5, чтобы не выпирать на дорогу)
+  addBox(cx, cz, w*0.5, d*0.5);
+
+  // блокеры для камеры — реальные меши
+  G.camBlocker.push(body, roof);
+
+  // тёплый свет из окна
+  var wl = new THREE.PointLight(0xffa726, 0.7, 9);
+  wl.position.set(cx, h*0.55, cz + (d/2 + 0.5));
+  scene.add(wl);
+}
+
+function makeChurch(cx, cz){
+  var g = new THREE.Group();
+  var body = new THREE.Mesh(new THREE.BoxGeometry(6, 5.5, 4.6), makeMat(0x4a2a6a));
+  body.position.y = 2.75;
+  body.castShadow = body.receiveShadow = true;
+  g.add(body);
+  // крыша-призма
+  var roof = new THREE.Mesh(new THREE.BoxGeometry(6.4, 6.4, 5.2), makeMat(0x2a1a4a));
+  roof.position.y = 5.5 + 1.4;
+  roof.rotation.z = Math.PI/4;
+  roof.castShadow = true;
+  g.add(roof);
+  // купол (луковица: сфера на цилиндре)
+  var drum = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.2, 1.4, 10), makeMat(0x3d2b5e));
+  drum.position.y = 9.6;
+  g.add(drum);
+  var dome = new THREE.Mesh(new THREE.SphereGeometry(1.15, 12, 10), 
+    new THREE.MeshStandardMaterial({color:0x7c3aed, emissive:0x4a2a8a, emissiveIntensity:0.6, metalness:0.4, roughness:0.4}));
+  dome.position.y = 10.9;
+  g.add(dome);
+  // крест
+  var cross = new THREE.Group();
+  var cv = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.7, 0.1), makeMat(0xffd54f));
+  cv.position.y = 0.45;
+  var ch = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.1), makeMat(0xffd54f));
+  ch.position.y = 0.65;
+  cross.add(cv); cross.add(ch);
+  cross.position.y = 12.3;
+  g.add(cross);
+  // окно-розетка
+  var rose = new THREE.Mesh(new THREE.CircleGeometry(0.9, 12),
+    new THREE.MeshStandardMaterial({color:0xffd54f, emissive:0xffa726, emissiveIntensity:1.5}));
+  rose.position.set(0, 3.6, 2.31);
+  g.add(rose);
+
+  g.position.set(cx, 0, cz);
+  scene.add(g);
+  addBox(cx, cz, 3.4, 2.8);
+  G.camBlocker.push(body, roof);
+  var cl = new THREE.PointLight(0xffa726, 0.8, 12);
+  cl.position.set(cx, 4, cz + 3);
+  scene.add(cl);
+}
+
+function makeTree(x, z, s){
+  var g = new THREE.Group();
+  var trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22*s, 0.34*s, 2.6*s, 7), makeMat(0x3a2440));
+  trunk.position.y = 1.3*s;
+  trunk.castShadow = true;
+  g.add(trunk);
+  var c1 = new THREE.Mesh(new THREE.ConeGeometry(1.6*s, 2.6*s, 7), makeMat(0x2e3d34));
+  c1.position.y = 3.1*s; c1.castShadow = true;
+  g.add(c1);
+  var c2 = new THREE.Mesh(new THREE.ConeGeometry(1.15*s, 2*s, 7), makeMat(0x35483c));
+  c2.position.y = 4.4*s; c2.castShadow = true;
+  g.add(c2);
+  var c3 = new THREE.Mesh(new THREE.ConeGeometry(0.7*s, 1.5*s, 7), makeMat(0x3b5242));
+  c3.position.y = 5.4*s; c3.castShadow = true;
+  g.add(c3);
+  g.position.set(x, 0, z);
+  scene.add(g);
+  addBox(x, z, 0.45*s, 0.45*s);
+  G.camBlocker.push(trunk);
+}
+
+function makeFence(x, z, len, axis){
+  var seg = 2.2, n = Math.round(len/seg);
+  for(var i = 0; i < n; i++){
+    var px = axis === 'x' ? x + i*seg : x;
+    var pz = axis === 'x' ? z : z + i*seg;
+    var rail = boxMesh(seg*0.92, 0.16, 0.12, 0x5a3a72, px, 0.95, pz);
+    var rail2 = boxMesh(seg*0.92, 0.16, 0.12, 0x5a3a72, px, 0.55, pz);
+    if(i % 2 === 0){
+      var post = boxMesh(0.14, 1.15, 0.14, 0x3d2b5e, px + (axis==='x' ? -seg/2 : 0), 0.6, pz + (axis==='x' ? 0 : -seg/2));
+      G.camBlocker.push(post);
+    }
+    addBox(px, pz, seg*0.48, 0.3);
+  }
+}
+
+function makeWell(x, z){
+  var base = cylMesh(1.5, 1.7, 0.7, 0x5a3a72, x, 0.35, z);
+  var inner = cylMesh(0.9, 0.9, 0.8, 0x14082e, x, 0.4, z);
+  var p1 = boxMesh(0.18, 1.6, 0.18, 0x3d2b5e, x - 1.1, 1.1, z);
+  var p2 = boxMesh(0.18, 1.6, 0.18, 0x3d2b5e, x + 1.1, 1.1, z);
+  var top = boxMesh(2.6, 0.18, 1.1, 0x6d4c33, x, 2.0, z);
+  addBox(x, z, 1.9, 1.9);
+  G.camBlocker.push(p1, p2);
+}
+
+function makeHaystack(x, z){
+  var h = coneMesh(1.3, 1.7, 0x8a6a3a, x, 0.85, z);
+  var h2 = sphereMesh(1.1, 0x7a5c30, x + 0.9, 0.7, z + 0.4);
+  addBox(x, z, 1.4, 1.4);
+  addBox(x + 0.9, z + 0.4, 1.0, 1.0);
+  G.camBlocker.push(h, h2);
+}
+
+/* ---------- Лошадь (боксы и цилиндры) ---------- */
+function makeHorse(){
+  var g = new THREE.Group();
+  var bodyMat = makeMat(0x3b2a4a), darkMat = makeMat(0x241a3d);
+  // тело
+  var body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.85, 0.72), bodyMat);
+  body.position.y = 1.35;
+  body.castShadow = true;
+  g.add(body);
+  // шея (наклонный бокс)
+  var neckPivot = new THREE.Group();
+  neckPivot.position.set(0.85, 1.7, 0);
+  var neck = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.15, 0.45), bodyMat);
+  neck.position.y = 0.45;
+  neck.castShadow = true;
+  neckPivot.add(neck);
+  neckPivot.rotation.z = -0.55;
+  g.add(neckPivot);
+  // голова
+  var head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.38, 0.62), bodyMat);
+  head.position.set(1.18, 2.35, 0);
+  head.castShadow = true;
+  g.add(head);
+  // морда
+  var muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.24, 0.4), darkMat);
+  muzzle.position.set(1.5, 2.25, 0);
+  g.add(muzzle);
+  // уши
+  var e1 = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.28, 4), darkMat);
+  e1.position.set(1.08, 2.68, 0.16);
+  g.add(e1);
+  var e2 = e1.clone(); e2.position.z = -0.16;
+  g.add(e2);
+  // грива
+  var mane = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.8, 0.12), darkMat);
+  mane.position.set(0.78, 2.15, 0.18);
+  mane.rotation.z = 0.4;
+  g.add(mane);
+  // хвост
+  var tail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.75, 0.14), darkMat);
+  tail.position.set(-1.0, 1.35, 0);
+  tail.rotation.x = 0.4;
+  g.add(tail);
+  // ноги (pivot сверху)
+  var legs = [];
+  var legOffsets = [[0.62, 0.22], [0.62, -0.22], [-0.62, 0.22], [-0.62, -0.22]];
+  for(var i = 0; i < 4; i++){
+    var piv = new THREE.Group();
+    piv.position.set(legOffsets[i][0], 1.35, legOffsets[i][1]);
+    var leg = new THREE.Mesh(new THREE.BoxGeometry(0.17, 1.2, 0.17), bodyMat);
+    leg.position.y = -0.68;
+    leg.castShadow = true;
+    piv.add(leg);
+    piv.userData.phase = i * Math.PI/2;
+    g.add(piv);
+    legs.push(piv);
+  }
+  g.userData.legs = legs;
+  g.userData.body = body;
+  scene.add(g);
+  return g;
+}
+
+/* ---------- Игрок (лоу-поли человечек из боксов) ---------- */
+function makePlayer(){
+  var g = new THREE.Group();
+  var jacket = makeMat(0x7c3aed), pants = makeMat(0x1a1a3a),
+      skin = makeMat(0xe8b98a), hair = makeMat(0x2a1a4a);
+  // тело (куртка)
+  var torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.72, 0.3), jacket);
+  torso.position.y = 1.22;
+  torso.castShadow = true;
+  g.add(torso);
+  // голова
+  var head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.34), skin);
+  head.position.y = 1.72;
+  head.castShadow = true;
+  g.add(head);
+  // волосы
+  var hairMesh = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.14, 0.38), hair);
+  hairMesh.position.y = 1.86;
+  g.add(hairMesh);
+  // руки (pivot на плечах)
+  var armPivots = [];
+  [[0.33, 1], [-0.33, 1]].forEach(function(s, i){
+    var piv = new THREE.Group();
+    piv.position.set(s[0], 1.48, 0);
+    var arm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.62, 0.14), jacket);
+    arm.position.y = -0.31;
+    arm.castShadow = true;
+    piv.add(arm);
+    piv.userData.side = s[1];
+    g.add(piv);
+    armPivots.push(piv);
+  });
+  // ноги (pivot на бёдрах)
+  var legPivots = [];
+  [[0.12, 1], [-0.12, -1]].forEach(function(s, i){
+    var piv = new THREE.Group();
+    piv.position.set(s[0], 0.86, 0);
+    var leg = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.86, 0.17), pants);
+    leg.position.y = -0.43;
+    leg.castShadow = true;
+    piv.add(leg);
+    piv.userData.side = s[1];
+    g.add(piv);
+    legPivots.push(piv);
+  });
+  g.userData.arms = armPivots;
+  g.userData.legs = legPivots;
+  scene.add(g);
+  return g;
+}
+/*WORLD-END*/
+
+</script>
+<script id="js-loop">
+/* ================= LOOP: движение, камера, коллизии, миссия ================= */
+var clock = new THREE.Clock();
+var raycaster = new THREE.Raycaster();
+var tmpVec = new THREE.Vector3();
+var vel = new THREE.Vector3();
+var moving = false;
+
+function start(){
+  initCore();
+  initWorld();
+  requestAnimationFrame(loop);
+}
+
+function controlTarget(){
+  return G.mounted ? horse : player;
+}
+
+function loop(){
+  requestAnimationFrame(loop);
+  var dt = Math.min(clock.getDelta(), 0.05);
+  if(G.missionDone){ renderer.render(scene, camera); return; }
+  update(dt);
+  renderer.render(scene, camera);
+}
+
+function update(dt){
+  var target = controlTarget();
+  var speedNow = G.mounted ? G.gallopSpeed : G.walkSpeed;
+
+  // --- Ввод направления относительно камеры ---
+  var fwd = new THREE.Vector3(-Math.sin(G.camYaw), 0, -Math.cos(G.camYaw));
+  var right = new THREE.Vector3(Math.cos(G.camYaw), 0, -Math.sin(G.camYaw));
+  var ix = 0, iz = 0;
+  if(G.keys['KeyW'] || G.keys['ArrowUp'])    { ix += fwd.x;  iz += fwd.z; }
+  if(G.keys['KeyS'] || G.keys['ArrowDown'])  { ix -= fwd.x;  iz -= fwd.z; }
+  if(G.keys['KeyA'] || G.keys['ArrowLeft'])  { ix -= right.x; iz -= right.z; }
+  if(G.keys['KeyD'] || G.keys['ArrowRight']) { ix += right.x; iz += right.z; }
+  if(G.keys['KeyQ']) G.camYaw += 2.2 * dt;
+  if(G.keys['KeyE'] && G.mountCooldown <= 0) G.camYaw -= 2.2 * dt; // E крутит камеру только при удержании
+  if(G.mountCooldown > 0) G.mountCooldown -= dt;
+  G.camPitch = Math.max(0.12, Math.min(1.15, G.camPitch));
+
+  moving = (ix !== 0 || iz !== 0);
+  var len = Math.hypot(ix, iz);
+  if(len > 0){
+    ix /= len; iz /= len;
+    vel.x += (ix * speedNow - vel.x) * Math.min(1, dt * 10);
+    vel.z += (iz * speedNow - vel.z) * Math.min(1, dt * 10);
+    var desiredYaw = Math.atan2(ix, iz);
+    // плавный разворот модели по направлению движения
+    var curYaw = target.rotation.y;
+    var diff = desiredYaw - curYaw;
+    while(diff > Math.PI) diff -= Math.PI*2;
+    while(diff < -Math.PI) diff += Math.PI*2;
+    target.rotation.y = curYaw + diff * Math.min(1, dt * 10);
+  } else {
+    vel.x *= Math.max(0, 1 - dt * 12);
+    vel.z *= Math.max(0, 1 - dt * 12);
+  }
+
+  // --- Перемещение с коллизиями ---
+  var nx = target.position.x + vel.x * dt;
+  var nz = target.position.z + vel.z * dt;
+  var r = G.mounted ? 0.7 : 0.4;
+  if(!collides(nx, target.position.z, r)) target.position.x = nx;
+  if(!collides(target.position.x, nz, r)) target.position.z = nz;
+
+  G.phase += dt * (G.mounted ? 13 : 7) * (moving ? 1 : 0);
+
+  // --- Анимация ---
+  animatePlayer(dt);
+  animateHorse(dt);
+
+  // --- Звуки шагов/галопа ---
+  if(moving){
+    G.footTimer -= dt;
+    if(G.footTimer <= 0){
+      G.footTimer = G.mounted ? 0.26 : 0.44;
+      if(G.mounted) gallopSound(); else stepSound();
+    }
+  }
+
+  // --- Маркеры (пульсация) ---
+  var pulse = 1 + Math.sin(clock.elapsedTime * 3) * 0.18;
+  markerA.userData.baseRing.scale.setScalar(pulse);
+  markerB.userData.baseRing.scale.setScalar(pulse);
+  markerA.rotation.y += dt * 0.8;
+  markerB.rotation.y += dt * 0.8;
+
+  // --- Подсказки и миссия ---
+  updateMission(dt);
+
+  // --- Камера ---
+  updateCamera(dt, target);
+}
+
+function collides(x, z, r){
+  for(var i = 0; i < G.buildings.length; i++){
+    var b = G.buildings[i];
+    if(x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r) return true;
+  }
+  return false;
+}
+
+function animatePlayer(dt){
+  var swing = Math.sin(G.phase) * 0.55;
+  player.userData.legs.forEach(function(p){
+    p.rotation.x = swing * p.userData.side;
+  });
+  player.userData.arms.forEach(function(p){
+    p.rotation.x = -swing * p.userData.side * 0.9;
+  });
+  // лёгкий подскок при ходьбе
+  player.position.y = moving ? Math.abs(Math.sin(G.phase)) * 0.05 : 0;
+}
+
+function animateHorse(dt){
+  var legs = horse.userData.legs;
+  var amp = G.mounted && moving ? 0.85 : (moving ? 0.35 : 0);
+  legs.forEach(function(p){
+    p.rotation.x = Math.sin(G.phase + p.userData.phase) * amp;
+  });
+  var body = horse.userData.body;
+  if(G.mounted && moving){
+    body.rotation.z = Math.sin(G.phase * 0.5) * 0.05;
+    body.position.y = 1.35 + Math.abs(Math.sin(G.phase)) * 0.09;
+  } else {
+    body.rotation.z *= 0.9;
+    body.position.y += (1.35 - body.position.y) * Math.min(1, dt*8);
+  }
+}
+
+function updateCamera(dt, target){
+  var ideal = tmpVec.set(
+    target.position.x + Math.sin(G.camYaw) * Math.cos(G.camPitch) * G.camDist,
+    target.position.y + 2.2 + Math.sin(G.camPitch) * G.camDist,
+    target.position.z + Math.cos(G.camYaw) * Math.cos(G.camPitch) * G.camDist
+  );
+  // Камера не проходит сквозь здания: raycast от цели к камере
+  raycaster.set(target.position.clone().add(new THREE.Vector3(0, 1.4, 0)), ideal.clone().sub(target.position).normalize());
+  var hits = raycaster.intersectObjects(G.camBlocker, false);
+  var maxDist = target.position.distanceTo(ideal);
+  if(hits.length > 0 && hits[0].distance < maxDist){
+    var d = Math.max(1.2, hits[0].distance - 0.35);
+    var dir = ideal.clone().sub(target.position).normalize();
+    ideal.copy(target.position).addScaledVector(dir, d);
+  }
+  camera.position.lerp(ideal, Math.min(1, dt * 8));
+  camera.lookAt(target.position.x, target.position.y + 1.6, target.position.z);
+}
+
+var promptEl = document.getElementById('prompt');
+var hintEl = document.getElementById('hint-mount');
+var objEl = document.getElementById('objective');
+var nearHorse = false;
+
+function updateMission(dt){
+  if(G.missionDone) return;
+  var dHorse = player.position.distanceTo(horse.position);
+  nearHorse = (!G.mounted && dHorse < 2.6);
+
+  if(nearHorse && !G.mounted){
+    promptEl.textContent = 'E — сесть на лошадь';
+    promptEl.classList.add('show');
+    hintEl.classList.add('show');
+  } else if(G.mounted){
+    promptEl.textContent = 'E — слезть с лошади';
+    promptEl.classList.add('show');
+    hintEl.classList.remove('show');
+  } else {
+    promptEl.classList.remove('show');
+    hintEl.classList.remove('show');
+  }
+
+  if(G.mounted){
+    objEl.innerHTML = 'Задание: доедь до точки <span class="k">Б</span>';
+    if(horse.position.distanceTo(pointB) < 3.5){
+      completeMission();
+    }
+  } else {
+    objEl.textContent = 'Задание: дойди до лошади, сядь и доедь до точки Б';
+  }
+}
+
+function tryMount(){
+  if(G.missionDone) return;
+  if(!G.mounted && nearHorse){
+    G.mounted = true;
+    player.visible = false;
+    player.position.copy(horse.position).add(new THREE.Vector3(-1.4, 0, 0));
+    vel.set(0, 0, 0);
+    G.mountCooldown = 0.25; // короткое нажатие E не крутит камеру
+  } else if(G.mounted){
+    G.mounted = false;
+    player.visible = true;
+    player.position.copy(horse.position).add(new THREE.Vector3(-1.4, 0, 0));
+    vel.set(0, 0, 0);
+    G.mountCooldown = 0.25;
+  }
+}
+
+function completeMission(){
+  G.missionDone = true;
+  victoryJingle();
+  document.getElementById('mission-complete').classList.add('show');
+}
+
+/* ---- Тест-хуки (детерминированная проверка, не влияют на игру) ---- */
+window.__gtav = {
+  teleport: function(x, z){ player.position.set(x, 0, z); },
+  horseTo: function(x, z){ horse.position.set(x, 0, z); },
+  mount: function(){ nearHorse = true; tryMount(); },
+  state: function(){
+    return {
+      mounted: G.mounted,
+      missionDone: G.missionDone,
+      px: player.position.x, pz: player.position.z,
+      hx: horse.position.x, hz: horse.position.z,
+      nearHorse: nearHorse,
+      buildings: G.buildings.length
+    };
+  }
+};
+
+start();
+/*LOOP-END*/
+
+</script>
+</body>
+</html>
